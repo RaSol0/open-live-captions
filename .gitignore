@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.env
+*.db
+.DS_Store
+
+# Notas de planificacion personales, no para el repo publico
+README_template.md
+brief_tecnico_vibeathon.md
+checklist_pre_evento.md
+timeline_24h.md
