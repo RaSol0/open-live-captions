@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nerdearla Live - Monitoreo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0B0E13;
+    --surface: #151920;
+    --surface-2: #1E232C;
+    --border: #2A3038;
+    --text-primary: #F5F7FA;
+    --text-secondary: #8B95A3;
+    --accent: #9147FF;
+    --success: #34D399;
+    --warning: #FBBF24;
+    --error: #F87171;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--text-primary);
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  .page-header { padding: 32px 32px 8px 32px; }
+  .page-header h1 { font-size: 24px; margin: 0 0 4px 0; }
+  .page-header p { color: var(--text-secondary); font-size: 14px; margin: 0; }
+
+  .stats-strip { display: flex; gap: 16px; padding: 16px 32px; flex-wrap: wrap; }
+  .metric-card {
+    flex: 1; min-width: 160px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px;
+  }
+  .metric-card .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .metric-card .value { font-size: 28px; font-weight: 700; }
+  .value.success { color: var(--success); }
+  .value.warning { color: var(--warning); }
+
+  .table-wrap { padding: 8px 32px 32px 32px; }
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden;
+  }
+  thead tr { background: var(--surface-2); }
+  th, td {
+    text-align: left; padding: 12px 16px; font-size: 13px;
+    border-top: 1px solid var(--border);
+  }
+  thead th { border-top: none; color: var(--text-secondary); font-weight: 700; }
+  tbody tr:first-child td { border-top: none; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 6px; background: var(--surface-2);
+    font-size: 12px; font-weight: 700;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .badge.running { color: var(--success); }
+  .badge.running .badge-dot { background: var(--success); }
+  .badge.idle { color: var(--text-secondary); }
+  .badge.idle .badge-dot { background: var(--text-secondary); }
+
+  .empty-state { padding: 48px; text-align: center; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>Panel de Monitoreo</h1>
+    <p>Estado en tiempo real de las sesiones activas</p>
+  </div>
+
+  <div class="stats-strip" id="stats-strip"></div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Sesion</th>
+          <th>Estado</th>
+          <th>Clientes conectados</th>
+          <th>Ultima actualizacion (original)</th>
+          <th>Ultima actualizacion (traducido)</th>
+        </tr>
+      </thead>
+      <tbody id="sessions-body">
+        <tr><td colspan="5" class="empty-state">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+  const statsStrip = document.getElementById('stats-strip');
+  const sessionsBody = document.getElementById('sessions-body');
+
+  function metricCard(label, value, cls) {
+    return `<div class="metric-card"><div class="label">${label}</div><div class="value ${cls || ''}">${value}</div></div>`;
+  }
+
+  async function refresh() {
+    let data;
+    try {
+      const res = await fetch('/status');
+      data = await res.json();
+    } catch (e) {
+      sessionsBody.innerHTML = '<tr><td colspan="5" class="empty-state">No se pudo conectar al servidor</td></tr>';
+      return;
+    }
+
+    const sessions = data.sessions || [];
+    const running = sessions.filter((s) => s.running).length;
+    const totalClients = sessions.reduce((acc, s) => acc + s.clients, 0);
+
+    statsStrip.innerHTML =
+      metricCard('Sesiones activas', `${running} / ${sessions.length}`) +
+      metricCard('Clientes conectados', totalClients, totalClients > 0 ? 'success' : '') +
+      metricCard('Sesiones inactivas', sessions.length - running, sessions.length - running > 0 ? 'warning' : '');
+
+    if (sessions.length === 0) {
+      sessionsBody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay sesiones activas todavia</td></tr>';
+      return;
+    }
+
+    sessionsBody.innerHTML = sessions.map((s) => {
+      const statusClass = s.running ? 'running' : 'idle';
+      const statusLabel = s.running ? 'En vivo' : 'Inactiva';
+      const lastOriginal = s.last_update.original ? new Date(s.last_update.original * 1000).toLocaleTimeString() : '--';
+      const lastTranslated = s.last_update.translated ? new Date(s.last_update.translated * 1000).toLocaleTimeString() : '--';
+      return `<tr>
+        <td>${s.session_id}</td>
+        <td><span class="badge ${statusClass}"><span class="badge-dot"></span>${statusLabel}</span></td>
+        <td>${s.clients}</td>
+        <td>${lastOriginal}</td>
+        <td>${lastTranslated}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

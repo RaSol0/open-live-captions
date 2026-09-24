@@ -1,38 +1,46 @@
-# [Nombre del proyecto]
+# Open Live Captions
 
-> [Una línea: transcripción y traducción simultánea en vivo, open source, para conferencias multi-sesión.]
+> Transcripción y traducción simultánea en vivo, open source, para conferencias multi-sesión.
 
-Construido para la [Nerdearla Vibeathon 2026](https://nerdearla26.devpost.com/) — transcripción y traducción en tiempo real de charlas en inglés, pensada para correr múltiples sesiones en simultáneo sin depender de operación manual ni herramientas comerciales.
-
-## Demo
-
-- Video demo: [link a YouTube]
-- [Screenshot o GIF de la vista de audiencia]
+Construido en la [Nerdearla Vibeathon 2026](https://nerdearla26.devpost.com/) — transcripción y traducción en tiempo real de charlas, pensada para correr múltiples sesiones en simultáneo sin depender de operación manual ni herramientas comerciales.
 
 ## Qué hace
 
-- Transcribe audio en vivo (inglés) y lo traduce a español en tiempo real.
-- Corre múltiples sesiones ("escenarios") en simultáneo, cada una aislada.
-- Vista de audiencia web: elegís sesión + idioma y ves los subtítulos en vivo.
-- Exporta la transcripción completa al cerrar cada sesión (SRT / VTT / texto).
-- Panel de monitoreo: estado, latencia y errores por sesión.
+- Transcribe audio en vivo y lo traduce en tiempo real (probado en inglés→español y español→inglés).
+- Corre múltiples sesiones ("escenarios") en simultáneo, cada una aislada — probado con 3 sesiones concurrentes sin degradación.
+- Vista de audiencia web: elegís escenario e idioma y ves los subtítulos en vivo, estilo closed captions.
+- Panel de monitoreo en `/admin`: estado, clientes conectados y última actualización por sesión.
+- Exporta la transcripción completa (SRT / VTT / texto).
 
 ## Arquitectura
 
-[Pegar acá el diagrama/resumen del brief técnico: ingest → worker por sesión → backend WS/API → frontend]
+```
+[Audio (archivo o stream)] -> [Session: conexion aislada a Gemini Live API]
+                                    |
+                                    v
+                          [CaptionBuffer: acumula fragmentos,
+                           corta por silencio o largo maximo]
+                                    |
+                        +-----------+-----------+
+                        v                       v
+                [WebSocket -> Frontend]   [SQLite -> Export]
+```
+
+Cada sesión (`Session` en `server.py`) es una conexión WebSocket independiente a la Gemini Live API, sin estado compartido con otras sesiones — por eso escalar a más escenarios es simplemente abrir más conexiones, no cambiar la arquitectura. El idioma destino también es un parámetro de la sesión (no está hardcodeado), así que agregar un idioma nuevo es una línea de configuración, no código nuevo.
 
 ## Requisitos
 
-- Python 3.x
-- Una API key de Gemini ([cómo conseguirla](https://aistudio.google.com/))
+- Python 3.11+
+- Una API key de Gemini ([conseguirla en Google AI Studio](https://aistudio.google.com/))
+- Acceso al modelo `gemini-3.5-live-translate-preview` (Live API, en preview a la fecha de este proyecto)
 
 ## Instalación
 
 ```bash
-git clone [url del repo]
-cd [nombre]
+git clone https://github.com/RaSol0/open-live-captions.git
+cd open-live-captions
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/Scripts/activate  # Windows (Git Bash). En cmd/PowerShell: venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 cp .env.example .env  # completar GEMINI_API_KEY
 ```
@@ -40,34 +48,47 @@ cp .env.example .env  # completar GEMINI_API_KEY
 ## Uso
 
 ```bash
-python run.py
+python -m uvicorn server:app --port 8000
 ```
 
-Abrir `http://localhost:8000` para la vista de audiencia, `http://localhost:8000/admin` para el panel de monitoreo.
+- Vista de audiencia: `http://localhost:8000/`
+- Panel de monitoreo: `http://localhost:8000/admin`
 
 ### Probar con audio de ejemplo
 
-El repo incluye audios de prueba en `sample_audio/` (extraídos de charlas anteriores de Nerdearla). Para simular una sesión:
+Este repo **no incluye archivos de audio** de terceros (evitamos publicar clips bajados de YouTube u otras fuentes con derechos de autor de otra gente). Para probarlo:
 
-```bash
-python run.py --session demo1 --source sample_audio/charla1.mp3
-```
+1. Conseguí un clip corto (15-30s) en formato `.wav`, mono, 16kHz — tuyo, grabado por vos, o de una fuente con licencia libre (ej. audio propio, Creative Commons).
+2. Convertilo si hace falta con ffmpeg: `ffmpeg -i tu_audio.mp4 -t 25 -ar 16000 -ac 1 -c:a pcm_s16le sample_audio/mi_clip.wav`
+3. Agregá la entrada correspondiente en `SAMPLE_AUDIO` dentro de `server.py`, o pasale la ruta directo a `live_pipeline.py <ruta>` para un test rápido por consola.
+
+La carpeta `sample_audio/` está en `.gitignore` a propósito — cada quien pone sus propios clips de prueba localmente.
 
 ### Correr varias sesiones en simultáneo
 
-[Explicar cómo levantar 2+ sesiones — ejemplo de comando o instrucciones]
+Cada combinación de escenario + idioma es una sesión aislada. Para probarlo, abrí dos pestañas del navegador en `http://localhost:8000/` y elegí escenarios distintos en cada una — cada pestaña dispara su propia conexión a la Live API, sin interferencia entre ellas. Confirmado con `load_test.py` corriendo 3 sesiones simultáneas sin errores:
+
+```bash
+python load_test.py 3
+```
 
 ## Cómo escalar a más sesiones
 
-Cada sesión es un worker aislado sin estado compartido — escalar es levantar más workers/procesos. [Pegar acá el resultado del load test sintético: cuántas sesiones simuladas, latencia observada, cómo desplegarían esto en producción para 10-30 sesiones.]
+Cada sesión es un worker aislado sin estado compartido — escalar es levantar más conexiones, no cambiar arquitectura. Resultado real del load test con 3 sesiones simultáneas (audio de prueba en loop):
+
+- 3/3 sesiones exitosas, sin errores de cuota ni caídas.
+- Latencia al primer mensaje: ~9s (incluye conexión + buffer inicial de audio, no latencia por palabra).
+- 12-16 mensajes de subtítulos por sesión en 15 segundos de audio.
+
+Para producción a 10-30 escenarios: cada sesión ya es independiente, así que el límite real es la cuota de la API de Gemini (revisar en Google Cloud Console → APIs & Services → Quotas) y el ancho de banda del servidor, no la arquitectura del código.
 
 ## Exportar transcripciones
 
 ```bash
-curl http://localhost:8000/export/demo1?format=srt > demo1.srt
+curl "http://localhost:8000/sessions/demo-en/export?format=srt&kind=translated_es" > demo-en.srt
 ```
 
-Formatos soportados: `srt`, `vtt`, `txt`.
+Formatos soportados: `srt`, `vtt`, `txt`. `kind` puede ser `original` o `translated_<codigo_idioma>` (ej. `translated_es`, `translated_en`).
 
 ## Licencia
 
@@ -78,8 +99,9 @@ Apache License 2.0 — ver [LICENSE](LICENSE).
 - Integración con OBS/vMix para quemar subtítulos en el stream.
 - Modo 100% local con Gemma (sin dependencia de API externa).
 - Glosario mantenible de términos técnicos y nombres propios.
-- Idiomas adicionales de entrada/salida (ej. portugués) — la arquitectura ya trata el idioma como parámetro de configuración, así que agregar uno nuevo no debería requerir cambios de código.
+- Modo de escucha con audio traducido (el modelo ya genera audio internamente; hoy solo extraemos el texto transcripto).
+- Más idiomas de entrada probados end-to-end (la arquitectura ya soporta cualquier idioma que soporte la Live API, solo probamos EN/ES en esta versión).
 
 ---
 
-Construido en la Nerdearla Vibeathon 2026 por [tu nombre].
+Construido en la Nerdearla Vibeathon 2026.
