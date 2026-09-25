@@ -348,13 +348,8 @@
   playerVideo.addEventListener('play', () => sendControl({ action: 'resume' }));
   playerVideo.addEventListener('seeked', () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (waitTimer) { clearInterval(waitTimer); }
+    if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
     translatedEl.textContent = 'Reiniciando la traduccion...';
-    const seekStart = performance.now();
-    waitTimer = setInterval(() => {
-      const secs = ((performance.now() - seekStart) / 1000).toFixed(0);
-      translatedEl.textContent = `Reiniciando la traduccion... (${secs}s)`;
-    }, 1000);
     sendControl({ action: 'seek', position: playerVideo.currentTime });
   });
 
@@ -368,12 +363,7 @@
     connDot.className = 'status-dot disconnected';
     connLabel.textContent = 'conectando...';
 
-    const connectStart = performance.now();
     translatedEl.textContent = 'Iniciando la traduccion...';
-    waitTimer = setInterval(() => {
-      const secs = ((performance.now() - connectStart) / 1000).toFixed(0);
-      translatedEl.textContent = `Iniciando la traduccion... (${secs}s)`;
-    }, 1000);
 
     if (!preserveVideo) {
       if (sessionId === 'live-mic') {
