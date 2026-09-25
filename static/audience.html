@@ -100,7 +100,10 @@
   .toggle-static::after {
     content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
     border-radius: 50%; background: var(--text-secondary);
+    transition: left 0.15s, background 0.15s;
   }
+  .toggle-static.on { background: var(--accent); }
+  .toggle-static.on::after { left: 16px; background: #fff; }
 
   .settings-back {
     cursor: pointer; gap: 10px; justify-content: flex-start; font-weight: 700;
@@ -207,17 +210,17 @@
               <span>Impulso de voz</span>
               <span class="toggle-static"></span>
             </div>
-            <div class="settings-row disabled">
-              <span>Modo ambiente</span>
-              <span class="toggle-static"></span>
+            <div class="settings-row settings-row-link" id="settings-text-size-row">
+              <span>Tamano de texto grande</span>
+              <span class="toggle-static" id="text-size-toggle"></span>
             </div>
             <div class="settings-row settings-row-link" id="settings-lang-row">
               <span>Subtitulos/CC</span>
               <span class="settings-value"><span id="settings-lang-value">Espanol</span> <span class="chevron-right">&#8250;</span></span>
             </div>
-            <div class="settings-row disabled">
-              <span>Temporizador de suspension</span>
-              <span class="settings-value">Desactivado</span>
+            <div class="settings-row settings-row-link" id="settings-contrast-row">
+              <span>Alto contraste</span>
+              <span class="toggle-static" id="contrast-toggle"></span>
             </div>
             <div class="settings-row disabled">
               <span>Velocidad de reproduccion</span>
@@ -261,8 +264,6 @@
           <div class="dropdown-item" data-value="txt">Transcripcion (.txt)</div>
         </div>
       </div>
-      <button id="btn-text-size" title="Tamano de texto">A+</button>
-      <button id="btn-contrast" title="Alto contraste">&#9680;</button>
     </div>
   </div>
 
@@ -492,11 +493,15 @@
     document.getElementById('download-label').innerHTML = 'Descargar &#9660;';
   });
 
-  document.getElementById('btn-text-size').addEventListener('click', () => {
-    document.body.classList.toggle('large-text');
+  document.getElementById('settings-text-size-row').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const on = document.body.classList.toggle('large-text');
+    document.getElementById('text-size-toggle').classList.toggle('on', on);
   });
-  document.getElementById('btn-contrast').addEventListener('click', () => {
-    document.body.classList.toggle('high-contrast');
+  document.getElementById('settings-contrast-row').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const on = document.body.classList.toggle('high-contrast');
+    document.getElementById('contrast-toggle').classList.toggle('on', on);
   });
 
   connect(currentSession, currentLang);
