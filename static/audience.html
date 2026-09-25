@@ -353,12 +353,12 @@
   playerVideo.addEventListener('seeked', () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (waitTimer) { clearInterval(waitTimer); }
-    originalEl.textContent = 'Re-sincronizando con la nueva posicion del video...';
+    originalEl.textContent = 'Reiniciando la traduccion...';
     translatedEl.textContent = '';
     const seekStart = performance.now();
     waitTimer = setInterval(() => {
       const secs = ((performance.now() - seekStart) / 1000).toFixed(0);
-      originalEl.textContent = `Re-sincronizando... (${secs}s, normalmente tarda ~9s)`;
+      originalEl.textContent = `Reiniciando la traduccion... (${secs}s)`;
     }, 1000);
     sendControl({ action: 'seek', position: playerVideo.currentTime });
   });
@@ -371,10 +371,10 @@
     connLabel.textContent = 'conectando...';
 
     const connectStart = performance.now();
-    originalEl.textContent = 'Conectando con el modelo de IA...';
+    originalEl.textContent = 'Iniciando la traduccion...';
     waitTimer = setInterval(() => {
       const secs = ((performance.now() - connectStart) / 1000).toFixed(0);
-      originalEl.textContent = `Conectando con el modelo de IA... (${secs}s, normalmente tarda ~9s en arrancar)`;
+      originalEl.textContent = `Iniciando la traduccion... (${secs}s)`;
     }, 1000);
 
     if (sessionId === 'live-mic') {
