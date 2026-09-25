@@ -20,7 +20,7 @@ CONFIG = types.LiveConnectConfig(
     output_audio_transcription=types.AudioTranscriptionConfig(),
     translation_config=types.TranslationConfig(
         target_language_code="es",
-        echo_target_language=False,
+        echo_target_language=True,
     ),
 )
 

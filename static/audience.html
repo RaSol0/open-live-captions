@@ -139,14 +139,13 @@
     position: relative; z-index: 2; margin-bottom: 56px;
     pointer-events: none;
   }
-  .caption-original, .caption-translated {
+  .caption-translated {
     position: relative;
     overflow: hidden;
     display: flex; flex-direction: column; align-items: center;
     min-height: 1.3em;
+    font-size: 24px; font-weight: 700; color: #fff; line-height: 1.3;
   }
-  .caption-original { font-size: 14px; color: var(--text-secondary); }
-  .caption-translated { font-size: 24px; font-weight: 700; color: #fff; line-height: 1.3; }
 
   .caption-line {
     text-align: center;
@@ -174,7 +173,6 @@
   .status-dot.disconnected { background: #F87171; }
 
   body.large-text .caption-translated { font-size: 52px; }
-  body.large-text .caption-original { font-size: 22px; }
   body.high-contrast .caption-bar { background: #000; }
   body.high-contrast .caption-translated { color: #FFFF00; }
 </style>
@@ -248,8 +246,7 @@
     <video id="player-video" class="hidden" muted playsinline controls></video>
     <div class="waveform-icon" id="waveform-icon">&#9834;</div>
     <div class="caption-bar">
-      <div class="caption-original" id="caption-original">Esperando audio...</div>
-      <div class="caption-translated" id="caption-translated"></div>
+      <div class="caption-translated" id="caption-translated">Esperando audio...</div>
     </div>
   </div>
 
@@ -268,7 +265,6 @@
   </div>
 
 <script>
-  const originalEl = document.getElementById('caption-original');
   const translatedEl = document.getElementById('caption-translated');
   const connDot = document.getElementById('conn-dot');
   const connLabel = document.getElementById('conn-label');
@@ -353,12 +349,11 @@
   playerVideo.addEventListener('seeked', () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (waitTimer) { clearInterval(waitTimer); }
-    originalEl.textContent = 'Reiniciando la traduccion...';
-    translatedEl.textContent = '';
+    translatedEl.textContent = 'Reiniciando la traduccion...';
     const seekStart = performance.now();
     waitTimer = setInterval(() => {
       const secs = ((performance.now() - seekStart) / 1000).toFixed(0);
-      originalEl.textContent = `Reiniciando la traduccion... (${secs}s)`;
+      translatedEl.textContent = `Reiniciando la traduccion... (${secs}s)`;
     }, 1000);
     sendControl({ action: 'seek', position: playerVideo.currentTime });
   });
@@ -370,15 +365,14 @@
 
     if (ws) { ws.close(); }
     if (waitTimer) { clearInterval(waitTimer); }
-    translatedEl.textContent = '';
     connDot.className = 'status-dot disconnected';
     connLabel.textContent = 'conectando...';
 
     const connectStart = performance.now();
-    originalEl.textContent = 'Iniciando la traduccion...';
+    translatedEl.textContent = 'Iniciando la traduccion...';
     waitTimer = setInterval(() => {
       const secs = ((performance.now() - connectStart) / 1000).toFixed(0);
-      originalEl.textContent = `Iniciando la traduccion... (${secs}s)`;
+      translatedEl.textContent = `Iniciando la traduccion... (${secs}s)`;
     }, 1000);
 
     if (!preserveVideo) {
@@ -425,12 +419,8 @@
       lastMsgTime = now;
 
       const msg = JSON.parse(event.data);
-      if (!msg.final || !ccEnabled) return;
-      if (msg.kind === 'original') {
-        showLine(originalEl, msg.text);
-      } else if (msg.kind === 'translated') {
-        showLine(translatedEl, msg.text);
-      }
+      if (!msg.final || !ccEnabled || msg.kind !== 'translated') return;
+      showLine(translatedEl, msg.text);
     };
   }
 

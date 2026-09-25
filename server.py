@@ -146,7 +146,7 @@ class Session:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             translation_config=types.TranslationConfig(
-                target_language_code=self.target_lang, echo_target_language=False
+                target_language_code=self.target_lang, echo_target_language=True
             ),
         )
 
