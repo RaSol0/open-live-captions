@@ -1,16 +1,23 @@
 import asyncio
+import json
+import logging
 import os
 import wave
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("open-live-captions")
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from google import genai
 from google.genai import types
 
 import db
 import export
+from glossary import apply_glossary
 
 load_dotenv()
 
@@ -19,6 +26,8 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 CHUNK_BYTES = 3200
 SILENCE_FLUSH_SECONDS = 1.2
 MAX_LINE_CHARS = 160
+FIRST_RESPONSE_TIMEOUT = 15
+MAX_CONNECT_ATTEMPTS = 3
 
 SAMPLE_AUDIO = {
     "demo-en": "sample_audio/en_test_clip.wav",
@@ -27,6 +36,9 @@ SAMPLE_AUDIO = {
 
 app = FastAPI()
 
+if os.path.isdir("local_media"):
+    app.mount("/media", StaticFiles(directory="local_media"), name="media")
+
 
 class Session:
     """Una sesion aislada: su propia conexion a la Live API, sus propios
@@ -34,16 +46,24 @@ class Session:
     lo que permite escalar a mas sesiones simplemente creando mas instancias.
     """
 
-    def __init__(self, session_id: str, audio_path: str, target_lang: str = "es"):
+    def __init__(self, session_id: str, audio_path: str | None, target_lang: str = "es", live: bool = False):
         self.session_id = session_id
         self.audio_path = audio_path
         self.target_lang = target_lang
+        self.live = live
+        self.live_queue: asyncio.Queue = asyncio.Queue()
         self.clients: set[WebSocket] = set()
         self.task: asyncio.Task | None = None
         self.buffers = {"original": "", "translated": ""}
         self.last_update = {"original": None, "translated": None}
         self.buffer_start = {"original": None, "translated": None}
         self.session_start = None
+        self.paused = False
+        self.gen = 0
+        self.lock = asyncio.Lock()
+
+    async def push_live_audio(self, chunk: bytes):
+        await self.live_queue.put(chunk)
 
     async def broadcast(self, message: dict):
         dead = []
@@ -71,7 +91,7 @@ class Session:
             await self.flush(kind)
 
     async def flush(self, kind: str):
-        text = self.buffers[kind].strip()
+        text = apply_glossary(self.buffers[kind].strip())
         if text:
             await self.broadcast(
                 {"session": self.session_id, "kind": kind, "text": text, "final": True}
@@ -86,8 +106,40 @@ class Session:
         self.last_update[kind] = None
         self.buffer_start[kind] = None
 
-    async def run(self):
-        self.session_start = asyncio.get_event_loop().time()
+    async def run(self, start_offset_seconds: float = 0.0):
+        """Corre el pipeline sobre el audio de prueba y, al llegar al final,
+        vuelve a arrancar desde el principio (loop) en vez de terminar.
+
+        Esto simula una fuente en vivo genuina: un stream real nunca "se
+        acaba", asi que un cliente que se conecta en cualquier momento
+        siempre encuentra una sesion activa. Sin este loop, la sesion
+        moria despues de una sola pasada y un cliente que llegaba tarde
+        se quedaba escuchando un pipeline ya terminado, sin recibir nada.
+        """
+        my_gen = self.gen
+        offset = start_offset_seconds
+        while my_gen == self.gen:
+            succeeded = False
+            for attempt in range(1, MAX_CONNECT_ATTEMPTS + 1):
+                if my_gen != self.gen:
+                    return
+                ok = await self._run_once(offset, my_gen, attempt)
+                if ok:
+                    succeeded = True
+                    break
+                if my_gen != self.gen:
+                    return
+                logger.warning(
+                    "Session %s: intento %d/%d sin respuesta, reintentando",
+                    self.session_id, attempt, MAX_CONNECT_ATTEMPTS,
+                )
+            if not succeeded:
+                return
+            offset = 0.0
+
+    async def _run_once(self, start_offset_seconds: float, my_gen: int, attempt: int) -> bool:
+        self.paused = False
+        self.session_start = asyncio.get_event_loop().time() - start_offset_seconds
         client = genai.Client(api_key=API_KEY)
         config = types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -98,37 +150,119 @@ class Session:
             ),
         )
 
-        with wave.open(self.audio_path, "rb") as wf:
-            data = wf.readframes(wf.getnframes())
+        if not self.live:
+            with wave.open(self.audio_path, "rb") as wf:
+                sample_rate = wf.getframerate()
+                channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                data = wf.readframes(wf.getnframes())
 
-        async with client.aio.live.connect(model=MODEL, config=config) as live_session:
+            bytes_per_second = sample_rate * channels * sampwidth
+            start_byte = int(start_offset_seconds * bytes_per_second)
+            start_byte -= start_byte % (channels * sampwidth)
+            data = data[start_byte:]
 
-            async def send():
-                for i in range(0, len(data), CHUNK_BYTES):
-                    await live_session.send_realtime_input(
-                        audio={"data": data[i : i + CHUNK_BYTES], "mime_type": "audio/pcm;rate=16000"}
-                    )
-                    await asyncio.sleep(CHUNK_BYTES / 2 / 16000)
+        first_response = asyncio.get_event_loop().create_future()
 
-            async def receive():
-                async for response in live_session.receive():
-                    sc = response.server_content
-                    if sc is None:
-                        continue
-                    if sc.input_transcription and sc.input_transcription.text:
-                        await self.add_fragment("original", sc.input_transcription.text)
-                    if sc.output_transcription and sc.output_transcription.text:
-                        await self.add_fragment("translated", sc.output_transcription.text)
+        try:
+            async with client.aio.live.connect(model=MODEL, config=config) as live_session:
 
-            recv_task = asyncio.create_task(receive())
-            await send()
-            await asyncio.sleep(4)
-            recv_task.cancel()
-            await self.flush("original")
-            await self.flush("translated")
+                async def send_from_file():
+                    for i in range(0, len(data), CHUNK_BYTES):
+                        if my_gen != self.gen:
+                            return
+                        while self.paused:
+                            if my_gen != self.gen:
+                                return
+                            await asyncio.sleep(0.2)
+                        await live_session.send_realtime_input(
+                            audio={"data": data[i : i + CHUNK_BYTES], "mime_type": "audio/pcm;rate=16000"}
+                        )
+                        await asyncio.sleep(CHUNK_BYTES / 2 / 16000)
+
+                async def send_from_live_queue():
+                    while my_gen == self.gen:
+                        try:
+                            chunk = await asyncio.wait_for(self.live_queue.get(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            continue
+                        while self.paused:
+                            if my_gen != self.gen:
+                                return
+                            await asyncio.sleep(0.2)
+                        await live_session.send_realtime_input(
+                            audio={"data": chunk, "mime_type": "audio/pcm;rate=16000"}
+                        )
+
+                send = send_from_live_queue if self.live else send_from_file
+
+                async def receive():
+                    async for response in live_session.receive():
+                        if my_gen != self.gen:
+                            return
+                        if not first_response.done():
+                            first_response.set_result(True)
+                        sc = response.server_content
+                        if sc is None:
+                            continue
+                        if sc.input_transcription and sc.input_transcription.text:
+                            await self.add_fragment("original", sc.input_transcription.text)
+                        if sc.output_transcription and sc.output_transcription.text:
+                            await self.add_fragment("translated", sc.output_transcription.text)
+
+                recv_task = asyncio.create_task(receive())
+                send_task = asyncio.create_task(send())
+
+                try:
+                    await asyncio.wait_for(asyncio.shield(first_response), timeout=FIRST_RESPONSE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    send_task.cancel()
+                    recv_task.cancel()
+                    return False
+
+                await send_task
+                await asyncio.sleep(4)
+                recv_task.cancel()
+                if my_gen == self.gen:
+                    await self.flush("original")
+                    await self.flush("translated")
+                return True
+        except Exception:
+            logger.exception(
+                "Session %s: error de conexion en intento %d", self.session_id, attempt
+            )
+            return False
+
+    def set_paused(self, paused: bool):
+        self.paused = paused
+
+    async def restart(self, offset_seconds: float):
+        async with self.lock:
+            self.gen += 1
+            if self.task and not self.task.done():
+                self.task.cancel()
+            for kind in ("original", "translated"):
+                self.buffers[kind] = ""
+                self.last_update[kind] = None
+                self.buffer_start[kind] = None
+            self.task = spawn_run(self, start_offset_seconds=offset_seconds)
 
 
 sessions: dict[str, Session] = {}
+
+
+def _log_task_result(task: asyncio.Task):
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.exception("Session task failed", exc_info=exc)
+
+
+def spawn_run(session: "Session", start_offset_seconds: float = 0.0) -> asyncio.Task:
+    task = asyncio.create_task(session.run(start_offset_seconds=start_offset_seconds))
+    task.add_done_callback(_log_task_result)
+    return task
 
 
 @app.on_event("startup")
@@ -176,19 +310,67 @@ async def ws_endpoint(websocket: WebSocket, session_id: str, target_lang: str):
     key = f"{session_id}:{target_lang}"
     session = sessions.get(key)
     if session is None:
-        audio_path = SAMPLE_AUDIO.get(session_id, "sample_audio/en_test_clip.wav")
-        session = Session(session_id, audio_path, target_lang=target_lang)
+        if session_id in SAMPLE_AUDIO:
+            session = Session(session_id, SAMPLE_AUDIO[session_id], target_lang=target_lang)
+        elif session_id.startswith("live"):
+            # Sesiones "live*" esperan audio real por /ws-ingest, no caen
+            # a un video de prueba por defecto (eso confundia "live-mic"
+            # con una demo la primera vez que lo armamos).
+            session = Session(session_id, audio_path=None, target_lang=target_lang, live=True)
+        else:
+            # Cualquier otro id desconocido (ej. los del load test) se
+            # trata como demo generica, asi cada uno dispara su propio
+            # pipeline aislado contra el mismo audio de prueba.
+            session = Session(session_id, "sample_audio/en_test_clip.wav", target_lang=target_lang)
         sessions[key] = session
     session.clients.add(websocket)
 
-    if session.task is None or session.task.done():
-        session.task = asyncio.create_task(session.run())
+    async with session.lock:
+        if session.task is None or session.task.done():
+            session.task = spawn_run(session)
 
     try:
         while True:
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            action = msg.get("action")
+            if action == "pause":
+                session.set_paused(True)
+            elif action == "resume":
+                session.set_paused(False)
+            elif action == "seek":
+                await session.restart(float(msg.get("position", 0)))
     except WebSocketDisconnect:
         session.clients.discard(websocket)
+
+
+@app.websocket("/ws-ingest/{session_id}/{target_lang}")
+async def ws_ingest(websocket: WebSocket, session_id: str, target_lang: str):
+    """Endpoint para transmitir audio en vivo desde el navegador (microfono
+    capturado con getUserMedia) hacia el pipeline. El cliente manda frames
+    binarios PCM16 mono 16kHz; este endpoint no devuelve captions, para eso
+    el mismo cliente (u otros) se conectan a /ws/{session_id}/{target_lang}.
+    """
+    await websocket.accept()
+    key = f"{session_id}:{target_lang}"
+    session = sessions.get(key)
+    if session is None:
+        session = Session(session_id, audio_path=None, target_lang=target_lang, live=True)
+        sessions[key] = session
+
+    async with session.lock:
+        if session.task is None or session.task.done():
+            session.task = spawn_run(session)
+
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            await session.push_live_audio(data)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.get("/")
@@ -199,6 +381,11 @@ async def root():
 @app.get("/admin")
 async def admin():
     return FileResponse("static/admin.html")
+
+
+@app.get("/broadcast")
+async def broadcast():
+    return FileResponse("static/broadcast.html")
 
 
 @app.get("/health")

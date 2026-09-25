@@ -66,19 +66,21 @@ La carpeta `sample_audio/` está en `.gitignore` a propósito — cada quien pon
 
 ### Correr varias sesiones en simultáneo
 
-Cada combinación de escenario + idioma es una sesión aislada. Para probarlo, abrí dos pestañas del navegador en `http://localhost:8000/` y elegí escenarios distintos en cada una — cada pestaña dispara su propia conexión a la Live API, sin interferencia entre ellas. Confirmado con `load_test.py` corriendo 3 sesiones simultáneas sin errores:
+Cada combinación de escenario + idioma es una sesión aislada. Para probarlo, abrí dos pestañas del navegador en `http://localhost:8000/` y elegí escenarios distintos en cada una — cada pestaña dispara su propia conexión a la Live API, sin interferencia entre ellas. Confirmado con `load_test.py` corriendo 10 sesiones simultáneas sin errores:
 
 ```bash
-python load_test.py 3
+python load_test.py 10
 ```
 
 ## Cómo escalar a más sesiones
 
-Cada sesión es un worker aislado sin estado compartido — escalar es levantar más conexiones, no cambiar arquitectura. Resultado real del load test con 3 sesiones simultáneas (audio de prueba en loop):
+Cada sesión es un worker aislado sin estado compartido — escalar es levantar más conexiones, no cambiar arquitectura. Resultado real del load test con 10 sesiones simultáneas (audio de prueba en loop, ventana de medición de 30s):
 
-- 3/3 sesiones exitosas, sin errores de cuota ni caídas.
-- Latencia al primer mensaje: ~9s (incluye conexión + buffer inicial de audio, no latencia por palabra).
-- 12-16 mensajes de subtítulos por sesión en 15 segundos de audio.
+- 10/10 sesiones exitosas, sin errores de cuota ni caídas.
+- Latencia al primer mensaje: ~2.2s promedio (min 2.08s, max 2.50s).
+- ~62 mensajes de subtítulos por sesión en 30 segundos de audio, de forma sostenida.
+
+Con menos concurrencia (3 sesiones) la latencia inicial fue similar en órdenes de magnitud (~9-15s en corridas con menor "warm-up" de la conexión), lo que sugiere que la mayor parte del costo es el arranque de cada conexión individual a la Live API, no la cantidad de sesiones en sí — consistente con que cada sesión es un worker totalmente aislado.
 
 Para producción a 10-30 escenarios: cada sesión ya es independiente, así que el límite real es la cuota de la API de Gemini (revisar en Google Cloud Console → APIs & Services → Quotas) y el ancho de banda del servidor, no la arquitectura del código.
 

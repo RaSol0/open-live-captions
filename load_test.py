@@ -13,7 +13,7 @@ import time
 import websockets
 
 SERVER = "ws://localhost:8000/ws"
-DURATION_SECONDS = 15
+DURATION_SECONDS = 30
 
 
 async def run_one(session_id: str, results: dict):
@@ -22,7 +22,7 @@ async def run_one(session_id: str, results: dict):
     count = 0
     errors = None
     try:
-        async with websockets.connect(f"{SERVER}/{session_id}") as ws:
+        async with websockets.connect(f"{SERVER}/{session_id}/es") as ws:
             end_at = start + DURATION_SECONDS
             while time.monotonic() < end_at:
                 remaining = end_at - time.monotonic()

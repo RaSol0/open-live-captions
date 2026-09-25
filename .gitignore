@@ -6,13 +6,15 @@ __pycache__/
 *.log
 .DS_Store
 
-# Audios de prueba locales: pueden contener contenido con derechos de
-# autor de terceros (charlas bajadas de YouTube, etc). No se publican
+# Audios/videos de prueba locales: pueden contener contenido con derechos
+# de autor de terceros (charlas bajadas de YouTube, etc). No se publican
 # en el repo. Ver README para como conseguir tus propios clips de prueba.
 sample_audio/
+local_media/
 
 # Notas de planificacion personales, no para el repo publico
 README_template.md
 brief_tecnico_vibeathon.md
 checklist_pre_evento.md
 timeline_24h.md
+guion_video_demo.md

@@ -72,22 +72,36 @@
     background: var(--surface); overflow: hidden; position: relative;
   }
   .waveform-icon { color: var(--border); font-size: 64px; margin-bottom: 24px; }
+  #player-video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: 0;
+  }
+  #player-video.hidden { display: none; }
 
   .caption-bar {
-    width: 100%; box-sizing: border-box;
-    padding: 16px 64px 32px 64px;
-    background: rgba(0,0,0,0.8);
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-    min-height: 90px; justify-content: center;
+    width: fit-content; max-width: min(800px, 80%); box-sizing: border-box;
+    padding: 10px 20px;
+    background: rgba(0,0,0,0.75); border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    justify-content: center;
+    position: relative; z-index: 2; margin-bottom: 56px;
+    pointer-events: none;
   }
-  .caption-original {
-    font-size: 16px; color: var(--text-secondary); text-align: center;
-    max-width: 900px;
+  .caption-original, .caption-translated {
+    position: relative;
+    overflow: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 1.3em;
   }
-  .caption-translated {
-    font-size: 36px; font-weight: 700; color: #fff; text-align: center;
-    line-height: 1.3; max-width: 900px;
+  .caption-original { font-size: 14px; color: var(--text-secondary); }
+  .caption-translated { font-size: 24px; font-weight: 700; color: #fff; line-height: 1.3; }
+
+  .caption-line {
+    text-align: center;
+    transition: transform 0.4s ease, opacity 0.4s ease;
+    transform: translateY(0); opacity: 1;
   }
+  .caption-line.leaving { transform: translateY(-100%); opacity: 0; }
 
   .footer {
     height: 48px; flex: 0 0 auto;
@@ -128,6 +142,7 @@
         <div class="dropdown-menu">
           <div class="dropdown-item" data-value="demo-en">Escenario 1 - Main Stage</div>
           <div class="dropdown-item" data-value="demo-es">Escenario 2 - Track B</div>
+          <div class="dropdown-item" data-value="live-mic">Microfono en vivo</div>
         </div>
       </div>
       <div class="pill dropdown" id="lang-dropdown">
@@ -137,13 +152,15 @@
         <div class="dropdown-menu">
           <div class="dropdown-item" data-value="es">Espanol</div>
           <div class="dropdown-item" data-value="en">English</div>
+          <div class="dropdown-item" data-value="pt">Portugues</div>
         </div>
       </div>
     </div>
   </div>
 
   <div class="player">
-    <div class="waveform-icon">&#9834;</div>
+    <video id="player-video" class="hidden" muted playsinline controls></video>
+    <div class="waveform-icon" id="waveform-icon">&#9834;</div>
     <div class="caption-bar">
       <div class="caption-original" id="caption-original">Esperando audio...</div>
       <div class="caption-translated" id="caption-translated"></div>
@@ -194,12 +211,95 @@
     document.querySelectorAll('.pill.dropdown.open').forEach((el) => el.classList.remove('open'));
   });
 
+  const playerVideo = document.getElementById('player-video');
+  const waveformIcon = document.getElementById('waveform-icon');
+  let waitTimer = null;
+
+  function typeText(el, text) {
+    if (el._typeTimer) clearInterval(el._typeTimer);
+    let i = 0;
+    const speed = Math.max(10, Math.min(35, 500 / Math.max(text.length, 1)));
+    el._typeTimer = setInterval(() => {
+      i++;
+      el.textContent = text.slice(0, i);
+      if (i >= text.length) {
+        clearInterval(el._typeTimer);
+        el._typeTimer = null;
+      }
+    }, speed);
+  }
+
+  function showLine(container, text) {
+    Array.from(container.childNodes).forEach((node) => {
+      if (!(node.classList && node.classList.contains('caption-line'))) {
+        container.removeChild(node);
+      }
+    });
+    const old = container.querySelector('.caption-line');
+    if (old) {
+      old.classList.add('leaving');
+      setTimeout(() => old.remove(), 400);
+    }
+    const line = document.createElement('div');
+    line.className = 'caption-line';
+    container.appendChild(line);
+    typeText(line, text);
+  }
+
+  function sendControl(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+    }
+  }
+
+  playerVideo.addEventListener('pause', () => sendControl({ action: 'pause' }));
+  playerVideo.addEventListener('play', () => sendControl({ action: 'resume' }));
+  playerVideo.addEventListener('seeked', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (waitTimer) { clearInterval(waitTimer); }
+    originalEl.textContent = 'Re-sincronizando con la nueva posicion del video...';
+    translatedEl.textContent = '';
+    const seekStart = performance.now();
+    waitTimer = setInterval(() => {
+      const secs = ((performance.now() - seekStart) / 1000).toFixed(0);
+      originalEl.textContent = `Re-sincronizando... (${secs}s, normalmente tarda ~9s)`;
+    }, 1000);
+    sendControl({ action: 'seek', position: playerVideo.currentTime });
+  });
+
   function connect(sessionId, lang) {
     if (ws) { ws.close(); }
-    originalEl.textContent = 'Esperando audio...';
+    if (waitTimer) { clearInterval(waitTimer); }
     translatedEl.textContent = '';
     connDot.className = 'status-dot disconnected';
     connLabel.textContent = 'conectando...';
+
+    const connectStart = performance.now();
+    originalEl.textContent = 'Conectando con el modelo de IA...';
+    waitTimer = setInterval(() => {
+      const secs = ((performance.now() - connectStart) / 1000).toFixed(0);
+      originalEl.textContent = `Conectando con el modelo de IA... (${secs}s, normalmente tarda ~9s en arrancar)`;
+    }, 1000);
+
+    if (sessionId === 'live-mic') {
+      playerVideo.pause();
+      playerVideo.removeAttribute('src');
+      playerVideo.classList.add('hidden');
+      waveformIcon.style.display = '';
+    } else {
+      const videoUrl = `/media/${sessionId}.mp4`;
+      playerVideo.src = videoUrl;
+      playerVideo.currentTime = 0;
+      playerVideo.play()
+        .then(() => {
+          playerVideo.classList.remove('hidden');
+          waveformIcon.style.display = 'none';
+        })
+        .catch(() => {
+          playerVideo.classList.add('hidden');
+          waveformIcon.style.display = '';
+        });
+    }
 
     ws = new WebSocket(`ws://${location.host}/ws/${sessionId}/${lang}`);
 
@@ -212,6 +312,7 @@
       connLabel.textContent = 'desconectado';
     };
     ws.onmessage = (event) => {
+      if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
       const now = performance.now();
       if (lastMsgTime) {
         latencyLabel.textContent = `Ultimo update: ${((now - lastMsgTime) / 1000).toFixed(1)}s atras`;
@@ -219,10 +320,11 @@
       lastMsgTime = now;
 
       const msg = JSON.parse(event.data);
+      if (!msg.final) return;
       if (msg.kind === 'original') {
-        originalEl.textContent = msg.text;
+        showLine(originalEl, msg.text);
       } else if (msg.kind === 'translated') {
-        translatedEl.textContent = msg.text;
+        showLine(translatedEl, msg.text);
       }
     };
   }

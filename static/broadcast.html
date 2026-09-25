@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nerdearla Live - Transmision</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0B0E13; --surface: #151920; --surface-2: #1E232C; --border: #2A3038;
+    --text-primary: #F5F7FA; --text-secondary: #8B95A3; --accent: #9147FF;
+    --live-red: #E91916; --success: #34D399;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--text-primary);
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px 0; }
+  p.subtitle { color: var(--text-secondary); font-size: 14px; margin: 0 0 32px 0; }
+
+  .field { margin-bottom: 20px; }
+  .field label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+  .field select, .field input {
+    width: 100%; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text-primary); font-family: inherit; font-size: 14px;
+  }
+
+  .mic-button {
+    width: 100%; padding: 16px; border-radius: 10px; border: none; cursor: pointer;
+    font-family: inherit; font-size: 16px; font-weight: 700; color: #fff;
+    background: var(--accent); margin-top: 8px;
+  }
+  .mic-button.recording { background: var(--live-red); }
+  .mic-button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .status-box {
+    margin-top: 24px; padding: 16px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; font-size: 14px; color: var(--text-secondary);
+  }
+  .status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .status-row:last-child { margin-bottom: 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
+  .dot.on { background: var(--success); }
+
+  .preview {
+    margin-top: 16px; padding: 16px; background: var(--surface-2); border-radius: 10px;
+    min-height: 60px; font-size: 15px; line-height: 1.4;
+  }
+  .preview .original { color: var(--text-secondary); font-size: 13px; margin-bottom: 4px; }
+  .preview .translated { color: #fff; font-weight: 700; }
+
+  .link-out { display: block; margin-top: 20px; color: var(--accent); font-size: 13px; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Panel de Transmision</h1>
+  <p class="subtitle">Capturá el audio del microfono y transmitilo en vivo al pipeline de traduccion.</p>
+
+  <div class="field">
+    <label>ID de sesion</label>
+    <input id="session-id" type="text" value="live-mic" />
+  </div>
+
+  <div class="field">
+    <label>Idioma destino de la traduccion</label>
+    <select id="lang-select">
+      <option value="es">Espanol</option>
+      <option value="en">English</option>
+      <option value="pt">Portugues</option>
+    </select>
+  </div>
+
+  <button class="mic-button" id="mic-btn">Iniciar transmision</button>
+
+  <div class="status-box">
+    <div class="status-row"><span class="dot" id="mic-dot"></span><span id="mic-status">Microfono inactivo</span></div>
+    <div class="status-row"><span class="dot" id="ws-dot"></span><span id="ws-status">Sin conexion al backend</span></div>
+  </div>
+
+  <div class="preview">
+    <div class="original" id="preview-original">La transcripcion en vivo aparece aca...</div>
+    <div class="translated" id="preview-translated"></div>
+  </div>
+
+  <a class="link-out" id="viewer-link" href="/" target="_blank">Abrir vista de audiencia para esta sesion &rarr;</a>
+</div>
+
+<script>
+  const sessionIdInput = document.getElementById('session-id');
+  const langSelect = document.getElementById('lang-select');
+  const micBtn = document.getElementById('mic-btn');
+  const micDot = document.getElementById('mic-dot');
+  const micStatus = document.getElementById('mic-status');
+  const wsDot = document.getElementById('ws-dot');
+  const wsStatus = document.getElementById('ws-status');
+  const previewOriginal = document.getElementById('preview-original');
+  const previewTranslated = document.getElementById('preview-translated');
+  const viewerLink = document.getElementById('viewer-link');
+
+  let audioCtx = null;
+  let micStream = null;
+  let ingestWs = null;
+  let viewWs = null;
+  let recording = false;
+
+  function updateViewerLink() {
+    viewerLink.href = '/';
+  }
+  sessionIdInput.addEventListener('input', updateViewerLink);
+  updateViewerLink();
+
+  function floatToPCM16(float32) {
+    const out = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return out;
+  }
+
+  async function startRecording() {
+    const sessionId = sessionIdInput.value.trim() || 'live-mic';
+    const lang = langSelect.value;
+
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const source = audioCtx.createMediaStreamSource(micStream);
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    const silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0;
+
+    source.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
+
+    ingestWs = new WebSocket(`ws://${location.host}/ws-ingest/${sessionId}/${lang}`);
+    ingestWs.binaryType = 'arraybuffer';
+    ingestWs.onopen = () => {
+      wsDot.classList.add('on');
+      wsStatus.textContent = 'Conectado al backend, transmitiendo';
+    };
+    ingestWs.onclose = () => {
+      wsDot.classList.remove('on');
+      wsStatus.textContent = 'Desconectado del backend';
+    };
+
+    processor.onaudioprocess = (e) => {
+      if (!recording) return;
+      const pcm16 = floatToPCM16(e.inputBuffer.getChannelData(0));
+      if (ingestWs.readyState === WebSocket.OPEN) {
+        ingestWs.send(pcm16.buffer);
+      }
+    };
+
+    viewWs = new WebSocket(`ws://${location.host}/ws/${sessionId}/${lang}`);
+    viewWs.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.kind === 'original') previewOriginal.textContent = msg.text;
+      if (msg.kind === 'translated') previewTranslated.textContent = msg.text;
+    };
+
+    micDot.classList.add('on');
+    micStatus.textContent = 'Microfono capturando';
+    micBtn.textContent = 'Detener transmision';
+    micBtn.classList.add('recording');
+    recording = true;
+  }
+
+  function stopRecording() {
+    recording = false;
+    if (micStream) micStream.getTracks().forEach((t) => t.stop());
+    if (audioCtx) audioCtx.close();
+    if (ingestWs) ingestWs.close();
+    if (viewWs) viewWs.close();
+    micDot.classList.remove('on');
+    micStatus.textContent = 'Microfono inactivo';
+    wsDot.classList.remove('on');
+    wsStatus.textContent = 'Sin conexion al backend';
+    micBtn.textContent = 'Iniciar transmision';
+    micBtn.classList.remove('recording');
+  }
+
+  micBtn.addEventListener('click', async () => {
+    if (recording) {
+      stopRecording();
+    } else {
+      micBtn.disabled = true;
+      try {
+        await startRecording();
+      } catch (err) {
+        micStatus.textContent = 'Error: ' + err.message;
+      }
+      micBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
