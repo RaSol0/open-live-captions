@@ -69,6 +69,52 @@
   #download-dropdown { font-size: 12px; padding: 6px 10px; }
   #download-dropdown .dropdown-menu { top: auto; bottom: calc(100% + 6px); }
 
+  #cc-toggle {
+    display: flex; align-items: center; justify-content: center;
+    padding: 8px 12px; background: var(--surface-2); border-radius: 8px;
+    font-size: 13px; font-weight: 700; color: var(--text-secondary);
+    border: none; cursor: pointer; font-family: inherit; letter-spacing: 0.5px;
+  }
+  #cc-toggle.active { background: var(--accent); color: #fff; }
+
+  #settings-dropdown { padding: 8px 10px; }
+  #settings-dropdown .gear-icon { font-size: 16px; }
+  #settings-dropdown .dropdown-menu { left: auto; right: 0; min-width: 300px; }
+
+  .settings-panel.hidden { display: none; }
+  .settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; font-size: 13px; color: #fff; white-space: nowrap;
+  }
+  .settings-row.settings-row-link { cursor: pointer; }
+  .settings-row.settings-row-link:hover { background: var(--accent); }
+  .settings-row.settings-row-link:hover .settings-value { color: #fff; }
+  .settings-row.disabled { color: var(--text-secondary); cursor: default; }
+  .settings-value { display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 12px; }
+  .chevron-right { font-size: 12px; }
+
+  .toggle-static {
+    width: 32px; height: 18px; border-radius: 10px; background: #3A4150;
+    position: relative; flex: 0 0 auto;
+  }
+  .toggle-static::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--text-secondary);
+  }
+
+  .settings-back {
+    cursor: pointer; gap: 10px; justify-content: flex-start; font-weight: 700;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-back:hover { background: var(--surface-2); }
+  .settings-lang-item {
+    padding: 10px 14px 10px 32px; color: #fff; font-size: 13px; cursor: pointer;
+  }
+  .settings-lang-item:hover { background: var(--accent); font-weight: 700; }
+  .settings-lang-item.selected::before { content: '\2713  '; }
+
+  .caption-bar.cc-off { display: none; }
+
   .player {
     flex: 1; display: flex; flex-direction: column;
     justify-content: flex-end; align-items: center;
@@ -148,14 +194,48 @@
           <div class="dropdown-item" data-value="live-mic">Microfono en vivo</div>
         </div>
       </div>
-      <div class="pill dropdown" id="lang-dropdown">
-        <span class="dot-accent">CC</span>
-        <span id="lang-label">Espanol</span>
-        <span class="chevron">&#9662;</span>
+      <button class="active" id="cc-toggle" title="Activar/desactivar subtitulos">CC</button>
+      <div class="pill dropdown" id="settings-dropdown">
+        <span class="gear-icon">&#9881;</span>
         <div class="dropdown-menu">
-          <div class="dropdown-item" data-value="es">Espanol</div>
-          <div class="dropdown-item" data-value="en">English</div>
-          <div class="dropdown-item" data-value="pt">Portugues</div>
+          <div class="settings-panel" id="settings-panel-main">
+            <div class="settings-row disabled">
+              <span>Volumen estable</span>
+              <span class="toggle-static"></span>
+            </div>
+            <div class="settings-row disabled">
+              <span>Impulso de voz</span>
+              <span class="toggle-static"></span>
+            </div>
+            <div class="settings-row disabled">
+              <span>Modo ambiente</span>
+              <span class="toggle-static"></span>
+            </div>
+            <div class="settings-row settings-row-link" id="settings-lang-row">
+              <span>Subtitulos/CC</span>
+              <span class="settings-value"><span id="settings-lang-value">Espanol</span> <span class="chevron-right">&#8250;</span></span>
+            </div>
+            <div class="settings-row disabled">
+              <span>Temporizador de suspension</span>
+              <span class="settings-value">Desactivado</span>
+            </div>
+            <div class="settings-row disabled">
+              <span>Velocidad de reproduccion</span>
+              <span class="settings-value">Normal</span>
+            </div>
+            <div class="settings-row disabled">
+              <span>Calidad</span>
+              <span class="settings-value">Auto</span>
+            </div>
+          </div>
+          <div class="settings-panel hidden" id="settings-panel-lang">
+            <div class="settings-row settings-back" id="settings-back">
+              <span>&#8249;</span><span>Subtitulos/CC</span>
+            </div>
+            <div class="settings-lang-item" data-value="es">Espanol</div>
+            <div class="settings-lang-item" data-value="en">English</div>
+            <div class="settings-lang-item" data-value="pt">Portugues</div>
+          </div>
         </div>
       </div>
     </div>
@@ -197,6 +277,9 @@
   let lastMsgTime = null;
   let currentSession = 'demo-en';
   let currentLang = 'es';
+  let ccEnabled = true;
+
+  const LANG_LABELS = { es: 'Espanol', en: 'English', pt: 'Portugues' };
 
   function setupDropdown(dropdownId, labelId, onSelect) {
     const dropdown = document.getElementById(dropdownId);
@@ -220,6 +303,7 @@
 
   document.addEventListener('click', () => {
     document.querySelectorAll('.pill.dropdown.open').forEach((el) => el.classList.remove('open'));
+    resetSettingsPanel();
   });
 
   const playerVideo = document.getElementById('player-video');
@@ -331,7 +415,7 @@
       lastMsgTime = now;
 
       const msg = JSON.parse(event.data);
-      if (!msg.final) return;
+      if (!msg.final || !ccEnabled) return;
       if (msg.kind === 'original') {
         showLine(originalEl, msg.text);
       } else if (msg.kind === 'translated') {
@@ -344,9 +428,57 @@
     currentSession = value;
     connect(currentSession, currentLang);
   });
-  setupDropdown('lang-dropdown', 'lang-label', (value) => {
-    currentLang = value;
-    connect(currentSession, currentLang);
+  const ccToggle = document.getElementById('cc-toggle');
+  ccToggle.addEventListener('click', () => {
+    ccEnabled = !ccEnabled;
+    ccToggle.classList.toggle('active', ccEnabled);
+    document.querySelector('.caption-bar').classList.toggle('cc-off', !ccEnabled);
+  });
+
+  const settingsDropdown = document.getElementById('settings-dropdown');
+  const settingsPanelMain = document.getElementById('settings-panel-main');
+  const settingsPanelLang = document.getElementById('settings-panel-lang');
+  const settingsLangValue = document.getElementById('settings-lang-value');
+
+  function resetSettingsPanel() {
+    settingsPanelLang.classList.add('hidden');
+    settingsPanelMain.classList.remove('hidden');
+  }
+
+  function selectSettingsLang(value) {
+    settingsDropdown.querySelectorAll('.settings-lang-item').forEach((item) => {
+      item.classList.toggle('selected', item.dataset.value === value);
+    });
+    settingsLangValue.textContent = LANG_LABELS[value];
+  }
+  selectSettingsLang(currentLang);
+
+  settingsDropdown.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.pill.dropdown.open').forEach((el) => {
+      if (el !== settingsDropdown) el.classList.remove('open');
+    });
+    settingsDropdown.classList.toggle('open');
+    if (!settingsDropdown.classList.contains('open')) resetSettingsPanel();
+  });
+  document.getElementById('settings-lang-row').addEventListener('click', (e) => {
+    e.stopPropagation();
+    settingsPanelMain.classList.add('hidden');
+    settingsPanelLang.classList.remove('hidden');
+  });
+  document.getElementById('settings-back').addEventListener('click', (e) => {
+    e.stopPropagation();
+    resetSettingsPanel();
+  });
+  settingsDropdown.querySelectorAll('.settings-lang-item').forEach((item) => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      currentLang = item.dataset.value;
+      selectSettingsLang(currentLang);
+      connect(currentSession, currentLang);
+      settingsDropdown.classList.remove('open');
+      resetSettingsPanel();
+    });
   });
   setupDropdown('download-dropdown', 'download-label', (format) => {
     const kind = `translated_${currentLang}`;
