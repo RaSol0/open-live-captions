@@ -363,7 +363,11 @@
     sendControl({ action: 'seek', position: playerVideo.currentTime });
   });
 
-  function connect(sessionId, lang) {
+  function connect(sessionId, lang, opts = {}) {
+    const preserveVideo = !!opts.preserveVideo && sessionId !== 'live-mic'
+      && !playerVideo.classList.contains('hidden') && playerVideo.src.endsWith(`/media/${sessionId}.mp4`);
+    const resumeAt = preserveVideo ? playerVideo.currentTime : 0;
+
     if (ws) { ws.close(); }
     if (waitTimer) { clearInterval(waitTimer); }
     translatedEl.textContent = '';
@@ -377,24 +381,26 @@
       originalEl.textContent = `Iniciando la traduccion... (${secs}s)`;
     }, 1000);
 
-    if (sessionId === 'live-mic') {
-      playerVideo.pause();
-      playerVideo.removeAttribute('src');
-      playerVideo.classList.add('hidden');
-      waveformIcon.style.display = '';
-    } else {
-      const videoUrl = `/media/${sessionId}.mp4`;
-      playerVideo.src = videoUrl;
-      playerVideo.currentTime = 0;
-      playerVideo.play()
-        .then(() => {
-          playerVideo.classList.remove('hidden');
-          waveformIcon.style.display = 'none';
-        })
-        .catch(() => {
-          playerVideo.classList.add('hidden');
-          waveformIcon.style.display = '';
-        });
+    if (!preserveVideo) {
+      if (sessionId === 'live-mic') {
+        playerVideo.pause();
+        playerVideo.removeAttribute('src');
+        playerVideo.classList.add('hidden');
+        waveformIcon.style.display = '';
+      } else {
+        const videoUrl = `/media/${sessionId}.mp4`;
+        playerVideo.src = videoUrl;
+        playerVideo.currentTime = 0;
+        playerVideo.play()
+          .then(() => {
+            playerVideo.classList.remove('hidden');
+            waveformIcon.style.display = 'none';
+          })
+          .catch(() => {
+            playerVideo.classList.add('hidden');
+            waveformIcon.style.display = '';
+          });
+      }
     }
 
     ws = new WebSocket(`ws://${location.host}/ws/${sessionId}/${lang}`);
@@ -402,6 +408,9 @@
     ws.onopen = () => {
       connDot.className = 'status-dot connected';
       connLabel.textContent = 'en vivo';
+      if (preserveVideo && resumeAt > 0) {
+        sendControl({ action: 'seek', position: resumeAt });
+      }
     };
     ws.onclose = () => {
       connDot.className = 'status-dot disconnected';
@@ -476,7 +485,7 @@
       e.stopPropagation();
       currentLang = item.dataset.value;
       selectSettingsLang(currentLang);
-      connect(currentSession, currentLang);
+      connect(currentSession, currentLang, { preserveVideo: true });
       settingsDropdown.classList.remove('open');
       resetSettingsPanel();
     });
