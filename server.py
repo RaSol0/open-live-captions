@@ -30,8 +30,8 @@ FIRST_RESPONSE_TIMEOUT = 15
 MAX_CONNECT_ATTEMPTS = 3
 
 SAMPLE_AUDIO = {
-    "demo-en": "sample_audio/en_test_clip.wav",
-    "demo-es": "sample_audio/midudev_clip.wav",
+    "demo-en": "sample_audio/demo_en_clip.wav",
+    "demo-es": "sample_audio/demo_es_clip.wav",
 }
 
 app = FastAPI()
@@ -321,13 +321,21 @@ async def ws_endpoint(websocket: WebSocket, session_id: str, target_lang: str):
             # Cualquier otro id desconocido (ej. los del load test) se
             # trata como demo generica, asi cada uno dispara su propio
             # pipeline aislado contra el mismo audio de prueba.
-            session = Session(session_id, "sample_audio/en_test_clip.wav", target_lang=target_lang)
+            session = Session(session_id, "sample_audio/demo_en_clip.wav", target_lang=target_lang)
         sessions[key] = session
     session.clients.add(websocket)
 
-    async with session.lock:
-        if session.task is None or session.task.done():
-            session.task = spawn_run(session)
+    if not session.live and len(session.clients) == 1:
+        # Primer/unico viewer conectandose a esta sesion: el video del
+        # cliente siempre arranca en el segundo 0, asi que resincronizamos
+        # el pipeline al mismo punto en vez de dejarlo donde iba su loop
+        # interno (que puede llevar varios ciclos de ventaja si la sesion
+        # ya venia corriendo de antes).
+        await session.restart(0.0)
+    else:
+        async with session.lock:
+            if session.task is None or session.task.done():
+                session.task = spawn_run(session)
 
     try:
         while True:
