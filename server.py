@@ -247,6 +247,19 @@ class Session:
                 self.buffer_start[kind] = None
             self.task = spawn_run(self, start_offset_seconds=offset_seconds)
 
+    async def stop(self):
+        async with self.lock:
+            self.gen += 1
+            if self.task and not self.task.done():
+                self.task.cancel()
+            self.task = None
+        for ws in list(self.clients):
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        self.clients.clear()
+
 
 sessions: dict[str, Session] = {}
 
@@ -302,6 +315,15 @@ async def status():
             }
         )
     return {"sessions": result}
+
+
+@app.post("/sessions/close")
+async def close_session(key: str):
+    session = sessions.pop(key, None)
+    if session is None:
+        return {"closed": False}
+    await session.stop()
+    return {"closed": True}
 
 
 @app.websocket("/ws/{session_id}/{target_lang}")

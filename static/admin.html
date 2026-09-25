@@ -66,6 +66,14 @@
   .badge.idle .badge-dot { background: var(--text-secondary); }
 
   .empty-state { padding: 48px; text-align: center; color: var(--text-secondary); }
+
+  .close-btn {
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--error);
+    background: transparent; color: var(--error); font-size: 12px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+  }
+  .close-btn:hover { background: var(--error); color: #fff; }
+  .close-btn:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
@@ -85,10 +93,11 @@
           <th>Clientes conectados</th>
           <th>Ultima actualizacion (original)</th>
           <th>Ultima actualizacion (traducido)</th>
+          <th>Accion</th>
         </tr>
       </thead>
       <tbody id="sessions-body">
-        <tr><td colspan="5" class="empty-state">Cargando...</td></tr>
+        <tr><td colspan="6" class="empty-state">Cargando...</td></tr>
       </tbody>
     </table>
   </div>
@@ -121,7 +130,7 @@
       metricCard('Sesiones inactivas', sessions.length - running, sessions.length - running > 0 ? 'warning' : '');
 
     if (sessions.length === 0) {
-      sessionsBody.innerHTML = '<tr><td colspan="5" class="empty-state">No hay sesiones activas todavia</td></tr>';
+      sessionsBody.innerHTML = '<tr><td colspan="6" class="empty-state">No hay sesiones activas todavia</td></tr>';
       return;
     }
 
@@ -136,9 +145,23 @@
         <td>${s.clients}</td>
         <td>${lastOriginal}</td>
         <td>${lastTranslated}</td>
+        <td><button class="close-btn" data-key="${s.session_id}">Cerrar</button></td>
       </tr>`;
     }).join('');
   }
+
+  sessionsBody.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.close-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = '...';
+    try {
+      await fetch('/sessions/close?key=' + encodeURIComponent(btn.dataset.key), { method: 'POST' });
+    } catch (err) {
+      // ignore, refresh will show real state
+    }
+    refresh();
+  });
 
   refresh();
   setInterval(refresh, 2000);
