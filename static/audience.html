@@ -66,6 +66,9 @@
   }
   .dropdown-item:hover { background: var(--accent); font-weight: 700; }
 
+  #download-dropdown { font-size: 12px; padding: 6px 10px; }
+  #download-dropdown .dropdown-menu { top: auto; bottom: calc(100% + 6px); }
+
   .player {
     flex: 1; display: flex; flex-direction: column;
     justify-content: flex-end; align-items: center;
@@ -141,7 +144,7 @@
         <span class="chevron">&#9662;</span>
         <div class="dropdown-menu">
           <div class="dropdown-item" data-value="demo-en">Escenario 1 - Main Stage</div>
-          <div class="dropdown-item" data-value="demo-es">Escenario 2 - Track B</div>
+          <div class="dropdown-item" data-value="demo-es">Escenario 2 - Stage B</div>
           <div class="dropdown-item" data-value="live-mic">Microfono en vivo</div>
         </div>
       </div>
@@ -170,6 +173,14 @@
   <div class="footer">
     <span id="latency-label">Latencia: --</span>
     <div class="a11y-controls">
+      <div class="pill dropdown" id="download-dropdown">
+        <span id="download-label">Descargar &#9660;</span>
+        <div class="dropdown-menu">
+          <div class="dropdown-item" data-value="srt">Transcripcion (.srt)</div>
+          <div class="dropdown-item" data-value="vtt">Transcripcion (.vtt)</div>
+          <div class="dropdown-item" data-value="txt">Transcripcion (.txt)</div>
+        </div>
+      </div>
       <button id="btn-text-size" title="Tamano de texto">A+</button>
       <button id="btn-contrast" title="Alto contraste">&#9680;</button>
     </div>
@@ -336,6 +347,17 @@
   setupDropdown('lang-dropdown', 'lang-label', (value) => {
     currentLang = value;
     connect(currentSession, currentLang);
+  });
+  setupDropdown('download-dropdown', 'download-label', (format) => {
+    const kind = `translated_${currentLang}`;
+    const url = `/sessions/${currentSession}/export?format=${format}&kind=${kind}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${currentSession}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    document.getElementById('download-label').innerHTML = 'Descargar &#9660;';
   });
 
   document.getElementById('btn-text-size').addEventListener('click', () => {

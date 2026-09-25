@@ -6,11 +6,14 @@ Construido en la [Nerdearla Vibeathon 2026](https://nerdearla26.devpost.com/) �
 
 ## Qué hace
 
-- Transcribe audio en vivo y lo traduce en tiempo real (probado en inglés→español y español→inglés).
-- Corre múltiples sesiones ("escenarios") en simultáneo, cada una aislada — probado con 3 sesiones concurrentes sin degradación.
-- Vista de audiencia web: elegís escenario e idioma y ves los subtítulos en vivo, estilo closed captions.
+- Transcribe audio en vivo y lo traduce en tiempo real (probado en inglés, español y portugués).
+- Recibe audio de un archivo de prueba **o de un micrófono real** capturado desde el navegador (`/broadcast`) — audio genuinamente en vivo, sin archivos pregrabados.
+- Corre múltiples sesiones ("escenarios") en simultáneo, cada una aislada — probado con 10 sesiones concurrentes sin degradación.
+- Vista de audiencia web: elegís escenario e idioma y ves los subtítulos en vivo, estilo closed captions, con animación tipo máquina de escribir.
+- Corrige automáticamente términos técnicos y nombres propios mal transcriptos (glosario en `glossary.py`), sin agregar latencia.
 - Panel de monitoreo en `/admin`: estado, clientes conectados y última actualización por sesión.
 - Exporta la transcripción completa (SRT / VTT / texto).
+- Sincroniza pausa/reanudar/rebobinar del video con el pipeline de traducción en tiempo real.
 
 ## Arquitectura
 
@@ -100,9 +103,9 @@ Apache License 2.0 — ver [LICENSE](LICENSE).
 
 - Integración con OBS/vMix para quemar subtítulos en el stream.
 - Modo 100% local con Gemma (sin dependencia de API externa).
-- Glosario mantenible de términos técnicos y nombres propios.
+- Video en vivo de la cámara visible en la vista de audiencia (evaluamos una version con fotogramas periodicos, pero no llega a ser video fluido real — lo dejamos afuera antes que mostrar algo a medias; requeriria WebRTC para hacerlo bien).
 - Modo de escucha con audio traducido (el modelo ya genera audio internamente; hoy solo extraemos el texto transcripto).
-- Más idiomas de entrada probados end-to-end (la arquitectura ya soporta cualquier idioma que soporte la Live API, solo probamos EN/ES en esta versión).
+- Más idiomas probados end-to-end (probamos inglés, español y portugués; la arquitectura soporta cualquier idioma que soporte la Live API sin cambios de código).
 
 ---
 
