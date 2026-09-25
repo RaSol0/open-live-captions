@@ -103,7 +103,7 @@ Apache License 2.0 — ver [LICENSE](LICENSE).
 
 - Integración con OBS/vMix para quemar subtítulos en el stream.
 - Modo 100% local con Gemma (sin dependencia de API externa).
-- Video en vivo de la cámara visible en la vista de audiencia (evaluamos una version con fotogramas periodicos, pero no llega a ser video fluido real — lo dejamos afuera antes que mostrar algo a medias; requeriria WebRTC para hacerlo bien).
+- Video en vivo de la cámara visible en la vista de audiencia (requeriria WebRTC para hacerlo bien).
 - Modo de escucha con audio traducido (el modelo ya genera audio internamente; hoy solo extraemos el texto transcripto).
 - Más idiomas probados end-to-end (probamos inglés, español y portugués; la arquitectura soporta cualquier idioma que soporte la Live API sin cambios de código).
 
